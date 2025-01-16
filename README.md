@@ -1,2 +1,1 @@
-# tsuyosa
-simple telegram bot which uses jackett to search on a mildly popular movie site
+# jackett search bot for a mildly popular movie site
