@@ -11,7 +11,7 @@ class TelegraphHelper:
 
     def __init__(self):
         if self.__telegraph_token is None:
-            self.__telegraph_token = self.create_new_telegraph_token("Tsuyosa") #"Tsuyosa" can be changed to any name u want
+            self.__telegraph_token = self.create_new_telegraph_token("PTPJackettBot") #"PTPJackettBot" can be changed to any name u want
 
     def create_new_telegraph_token(self, name):
         tgraph = Telegraph()
