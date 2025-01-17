@@ -1,5 +1,5 @@
-from bot import TorrentSearchBot
+from bot import JackettSearchBot
 
 if __name__ == '__main__':
-    bot = TorrentSearchBot()
+    bot = JackettSearchBot()
     bot.run()
