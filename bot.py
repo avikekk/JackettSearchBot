@@ -10,7 +10,7 @@ import math
 from datetime import datetime
 from ptp_checker import check_ptp
 
-class TorrentSearchBot:
+class JackettSearchBot:
     def __init__(self):
         load_dotenv('config.env')
         self.token = os.getenv('TELEGRAM_TOKEN')
@@ -217,7 +217,7 @@ class TorrentSearchBot:
             response = self.telegraph_helper.create_page(
                 title="Search Results",
                 html_content=formatted_results,
-                author_name="TorrentSearchBot"
+                author_name="JackettSearchBot"
             )
             return response.get("url")
         except Exception as e:
