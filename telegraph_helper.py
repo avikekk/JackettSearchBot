@@ -29,3 +29,16 @@ class TelegraphHelper:
             author_name=author_name
         )
         return response
+
+    def send_results_to_telegraph(self, results):
+        formatted_results = "<br>".join([result.replace("\n", "<br>") for result in results])
+        try:
+            response = self.create_page(
+                title="Search Results",
+                html_content=formatted_results,
+                author_name="JackettSearchBot"
+            )
+            return response.get("url")
+        except Exception as e:
+            print(f'Error Pasting to Telegraph: {str(e)}')  # Modify based on your logging setup
+            return None
