@@ -5,10 +5,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegraph_helper import TelegraphHelper
 import requests
-import xml.etree.ElementTree as ET
-import math
-from datetime import datetime
 from ptp_checker import check_ptp
+from jackett import (
+    get_jackett_search_url,
+    parse_jackett_response,
+    parse_jackett_response_for_paste
+)
 
 class JackettSearchBot:
     def __init__(self):
@@ -72,7 +74,11 @@ class JackettSearchBot:
         
         query = ' '.join(query_args)
         message = update.message.reply_text("Please Wait, Searching...")
-        jackett_search_url = self._get_jackett_search_url(query)
+        jackett_search_url = get_jackett_search_url(
+            self.jackett_url,
+            self.jackett_api_key,
+            query
+        )
 
         try:
             response = requests.get(jackett_search_url)
@@ -80,7 +86,7 @@ class JackettSearchBot:
 
             if response.text.strip():
                 # Parse results with Golden Popcorn filter
-                all_results = self._parse_jackett_response_for_paste(response.content, golden_popcorn)
+                all_results = parse_jackett_response_for_paste(response.content, golden_popcorn)
 
                 # Check if there are any results before proceeding
                 if not all_results:
@@ -89,7 +95,7 @@ class JackettSearchBot:
                     return
 
                 # Send results to Telegraph if available
-                telegraph_url = self._send_results_to_telegraph(all_results)
+                telegraph_url = self.telegraph_helper.send_results_to_telegraph(all_results)
 
                 if not telegraph_url:
                     update.message.reply_text("Telegraph Error")
@@ -97,7 +103,7 @@ class JackettSearchBot:
                     return
 
                 # Process limited results for inline display
-                limited_results = self._parse_jackett_response(response.content, golden_popcorn)
+                limited_results = parse_jackett_response(response.content, golden_popcorn) 
                 total_results = len(limited_results)
                 limited_results_text = '\n'.join(limited_results[:self.default_max_results])
                 remaining_results = total_results - self.default_max_results
@@ -126,103 +132,6 @@ class JackettSearchBot:
         except Exception as e:
             self.logger.exception(f'Unexpected Error Occurred: {str(e)}')
             update.message.reply_text('Unexpected Error Occurred')
-
-    def _parse_jackett_response(self, response_content, golden_popcorn=False):
-        root = ET.fromstring(response_content)
-        results = []
-
-        for item in root.findall(".//item"):
-            title = item.find('title').text
-            
-            # Skip if Golden Popcorn filter is active and title doesn't contain it
-            if golden_popcorn and "Golden Popcorn" not in title:
-                continue
-                
-            size_bytes = int(item.find('size').text)
-            size_readable = self._convert_size(size_bytes)
-            pub_date = item.find('pubDate').text
-            formatted_pub_date = self._format_pub_date(pub_date)
-
-            result_text = (
-                f'<b>Title:</b> <code>{title}</code>\n'
-                f'<b>Age:</b> {formatted_pub_date}\n'
-                f'<b>Size:</b> {size_readable}\n'
-            )
-            results.append(result_text)
-
-        return results
-
-    def _parse_jackett_response_for_paste(self, response_content, golden_popcorn=False):
-        root = ET.fromstring(response_content)
-        results = []
-
-        for item in root.findall(".//item"):
-            title = item.find('title').text
-            
-            # Skip if Golden Popcorn filter is active and title doesn't contain it
-            if golden_popcorn and "Golden Popcorn" not in title:
-                continue
-                
-            size_bytes = int(item.find('size').text)
-            size_readable = self._convert_size(size_bytes)
-            pub_date = item.find('pubDate').text
-            formatted_pub_date = self._format_pub_date(pub_date)
-
-            result_text = (
-                f'Title: {title}\n'
-                f'Age: {formatted_pub_date}\n'
-                f'Size: {size_readable}\n'
-            )
-            results.append(result_text)
-
-        return results
-
-    def _get_jackett_search_url(self, query):
-        if query.startswith("tt") and query[2:].isdigit():
-            return f'{self.jackett_url}/api/v2.0/indexers/all/results/torznab/api?apikey={self.jackett_api_key}&imdbid={query}'
-        else:
-            query = requests.utils.quote(query)
-            return f'{self.jackett_url}/api/v2.0/indexers/all/results/torznab/api?apikey={self.jackett_api_key}&t=search&q={query}'
-
-    def _convert_size(self, size_bytes):
-        if size_bytes == 0:
-            return "0 B"
-        size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-        i = int(math.floor(math.log(size_bytes, 1024)))
-        p = math.pow(1024, i)
-        s = round(size_bytes / p, 2)
-        return f"{s} {size_name[i]}"
-
-    def _format_pub_date(self, pub_date):
-        date_obj = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %z")
-        time_elapsed = datetime.now(date_obj.tzinfo) - date_obj
-
-        if time_elapsed.days > 0:
-            return f'{time_elapsed.days} d'
-        else:
-            hours, remainder = divmod(time_elapsed.seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-
-            if hours > 0:
-                return f'{hours} h'
-            elif minutes > 0:
-                return f'{minutes} m'
-            else:
-                return f'{seconds} s'
-
-    def _send_results_to_telegraph(self, results):
-        formatted_results = "<br>".join([result.replace("\n", "<br>") for result in results])
-
-        try:
-            response = self.telegraph_helper.create_page(
-                title="Search Results",
-                html_content=formatted_results,
-                author_name="JackettSearchBot"
-            )
-            return response.get("url")
-        except Exception as e:
-            self.logger.error(f'Error Pasting to Telegraph: {str(e)}')
-            return None
 
     def _is_authorized(self, user_id, chat_id):
         return chat_id in self.authorized_chat_ids or user_id == self.owner_id
