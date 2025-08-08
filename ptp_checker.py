@@ -1,11 +1,10 @@
 import requests
-from telegram import Update
-from telegram.ext import CallbackContext
+from pyrogram.types import Message
 
-def check_ptp(update: Update, context: CallbackContext):
+async def check_ptp(message: Message):
     try:
         response = requests.get("https://passthepopcorn.me", timeout=5)
         response.raise_for_status()
-        update.message.reply_text("chal raha hai")
+        await message.reply_text("chal raha hai")
     except (requests.RequestException, requests.Timeout):
-        update.message.reply_text("gaya bhai")
+        await message.reply_text("gaya bhai")
