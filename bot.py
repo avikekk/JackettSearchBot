@@ -1,8 +1,9 @@
 import os
 import logging
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ParseMode
 from telegraph_helper import TelegraphHelper
 import requests
 from ptp_checker import check_ptp
@@ -16,6 +17,8 @@ class JackettSearchBot:
     def __init__(self):
         load_dotenv('config.env')
         self.token = os.getenv('TELEGRAM_TOKEN')
+        self.api_id = int(os.getenv('API_ID'))
+        self.api_hash = os.getenv('API_HASH')
         self.jackett_api_key = os.getenv('JACKETT_API_KEY')
         self.jackett_url = os.getenv('JACKETT_URL')
         self.default_max_results = int(os.getenv('MAX_RESULTS', 10))
@@ -28,52 +31,67 @@ class JackettSearchBot:
         self.telegraph_helper = TelegraphHelper()
 
         logging.basicConfig(
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            level=logging.INFO
+            format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+            level=logging.INFO,
+            handlers=[logging.StreamHandler()]
         )
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger("JackettSearchBot")
+        self.logger.info("JackettSearchBot initialized.")
 
-        self.updater = Updater(self.token)
-        self.dp = self.updater.dispatcher
+        self.app = Client(
+            "jackett_bot",
+            api_id=self.api_id,
+            api_hash=self.api_hash,
+            bot_token=self.token
+        )
+
         self._register_handlers()
 
     def _register_handlers(self):
-        self.dp.add_handler(CommandHandler("start", self.start))
-        self.dp.add_handler(CommandHandler("release", self.search))
-        self.dp.add_handler(CommandHandler("check", check_ptp))
-    
-    def start(self, update: Update, context: CallbackContext):
-        user_id = update.effective_user.id
-        chat_id = update.message.chat_id
+        @self.app.on_message(filters.command("start"))
+        async def start_handler(client, message):
+            await self.start(message)
 
-        self.logger.info(f"User ID: {user_id}, Chat ID: {chat_id}, Authorized IDs: {self.authorized_chat_ids}")
+        @self.app.on_message(filters.command("release"))
+        async def search_handler(client, message):
+            await self.search(message)
+
+        @self.app.on_message(filters.command("check"))
+        async def check_handler(client, message):
+            await check_ptp(message)
+    
+    async def start(self, message: Message):
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+
 
         if self._is_authorized(user_id, chat_id):
-            update.message.reply_text("Bot Started")
+            await message.reply_text("Bot Started")
         else:
-            update.message.reply_text("Not Authorized")
+            await message.reply_text("Not Authorized")
 
-    def search(self, update: Update, context: CallbackContext):
-        user_id = update.effective_user.id
-        chat_id = update.message.chat_id
+    async def search(self, message: Message):
+        user_id = message.from_user.id
+        chat_id = message.chat.id
 
         if not self._is_authorized(user_id, chat_id):
-            update.message.reply_text("Not Authorized")
+            await message.reply_text("Not Authorized")
             return
 
-        query_args = context.args
-        if not query_args:
-            update.message.reply_text("Please Provide Query or IMDb ID/URL")
+        # Extract query arguments from message text
+        command_parts = message.text.split()[1:]  # Skip the command itself
+        if not command_parts:
+            await message.reply_text("Please Provide Query or IMDb ID/URL")
             return
 
         # Check for Golden Popcorn flag
         golden_popcorn = False
-        if '-gp' in query_args:
+        if '-gp' in command_parts:
             golden_popcorn = True
-            query_args.remove('-gp')
+            command_parts.remove('-gp')
         
-        query = ' '.join(query_args)
-        message = update.message.reply_text("Please Wait, Searching...")
+        query = ' '.join(command_parts)
+        sent_message = await message.reply_text("Please Wait, Searching...")
         jackett_search_url = get_jackett_search_url(
             self.jackett_url,
             self.jackett_api_key,
@@ -90,16 +108,16 @@ class JackettSearchBot:
 
                 # Check if there are any results before proceeding
                 if not all_results:
-                    update.message.reply_text('No Results' + (' (with GP)' if golden_popcorn else ''))
-                    context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+                    await message.reply_text('No Results' + (' (with GP)' if golden_popcorn else ''))
+                    await sent_message.delete()
                     return
 
                 # Send results to Telegraph if available
                 telegraph_url = self.telegraph_helper.send_results_to_telegraph(all_results)
 
                 if not telegraph_url:
-                    update.message.reply_text("Telegraph Error")
-                    context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+                    await message.reply_text("Telegraph Error")
+                    await sent_message.delete()
                     return
 
                 # Process limited results for inline display
@@ -117,25 +135,25 @@ class JackettSearchBot:
                 keyboard = [[InlineKeyboardButton("RESULTS", url=telegraph_url)]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-                update.message.reply_text(
+                await message.reply_text(
                     final_message_text,
-                    parse_mode='HTML',
+                    parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup
                 )
-                context.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+                await sent_message.delete()
             else:
-                update.message.reply_text('No Results')
+                await message.reply_text('No Results')
 
         except requests.exceptions.HTTPError as http_err:
             self.logger.error(f'HTTP Error Occurred: {http_err}')
-            update.message.reply_text(f'HTTP Error Occurred')
+            await message.reply_text(f'HTTP Error Occurred')
         except Exception as e:
             self.logger.exception(f'Unexpected Error Occurred: {str(e)}')
-            update.message.reply_text('Unexpected Error Occurred')
+            await message.reply_text('Unexpected Error Occurred')
 
     def _is_authorized(self, user_id, chat_id):
         return chat_id in self.authorized_chat_ids or user_id == self.owner_id
 
     def run(self):
-        self.updater.start_polling()
-        self.updater.idle()
+        self.logger.info("Bot is running...")
+        self.app.run()
